@@ -11,6 +11,7 @@ SERVER="$(find "${ROOT}/bin" -type f -name llama-server 2>/dev/null | head -n1)"
 PORT="${PORT:-8080}"
 CTX="${CTX:-8192}"          # context window. 4k halves RAM vs 8k
 THREADS="${THREADS:-$(nproc)}"
+ALIAS="${ALIAS:-qwen2.5-coder-7b-abliterated}"
 
 [ -x "${SERVER}" ]     || { echo "missing llama-server -- run ./scripts/setup.sh first" >&2; exit 1; }
 [ -s "${MODEL_PATH}" ] || { echo "missing model ${MODEL_FILE} -- run ./scripts/setup.sh first" >&2; exit 1; }
@@ -28,5 +29,5 @@ exec "${SERVER}" \
   --threads "${THREADS}" \
   --threads-batch "${THREADS}" \
   --jinja \
-  --alias qwen2.5-coder-7b-abliterated \
+  --alias "${ALIAS}" \
   --no-warmup
