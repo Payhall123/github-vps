@@ -24,7 +24,7 @@ disk     : 5.3 GB of 32 GB used (4.5 GB is the model)
 | | |
 |---|---|
 | Machine | 4 vCPU / 16 GB RAM / 32 GB disk (`standardLinux32gb`) |
-| Model | Qwen2.5-Coder-7B-Instruct-**abliterated**, Q4_K_M, 4.68 GB |
+| Model | Qwen2.5-Coder-**abliterated** 7B Q4_K_M (4.68 GB) and 3B Q4_K_M (1.5 GB) |
 | Runtime | llama.cpp `llama-server` (nightly `ubuntu-x64` build), CPU-only, no CUDA |
 | Endpoint | `http://127.0.0.1:8080/v1` — OpenAI-compatible (`/v1/chat/completions`, `/v1/models`) |
 | Throughput | ~7.6 tok/s. Fine for chat, autocomplete and short edits — slow for whole-file rewrites |
@@ -69,8 +69,18 @@ Hugging Face with `curl -C -` so an interrupted download resumes.
 ### 3. Serve
 
 ```bash
-./scripts/serve.sh      # foreground; keep this terminal
+./scripts/serve.sh      # 7B on :8080, foreground; keep this terminal
 ```
+
+The 3B on a second port (much faster to prompt — see the prefill section), after
+stopping the 7B:
+
+```bash
+PORT=8081 CTX=16384 ALIAS=qwen2.5-coder-3b-abliterated \
+MODEL_FILE=Qwen2.5-Coder-3B-Instruct-abliterated-Q4_K_M.gguf ./scripts/serve.sh
+```
+
+Only one server at a time on a 4-core box.
 
 Second terminal:
 
@@ -134,6 +144,10 @@ Trade quality for tokens/sec:
 MODEL_FILE=Qwen2.5-Coder-7B-Instruct-abliterated-Q6_K.gguf ./scripts/setup.sh   # 6.25 GB, best quality that fits
 MODEL_FILE=Qwen2.5-Coder-7B-Instruct-abliterated-Q4_K_S.gguf ./scripts/setup.sh  # 4.46 GB, slightly faster
 MODEL_FILE=Qwen2.5-Coder-7B-Instruct-abliterated-Q3_K_M.gguf ./scripts/setup.sh  # 3.81 GB, more RAM headroom
+
+# 3B — the one that's actually responsive through OpenCode
+MODEL_REPO=bartowski/Qwen2.5-Coder-3B-Instruct-abliterated-GGUF \
+MODEL_FILE=Qwen2.5-Coder-3B-Instruct-abliterated-Q4_K_M.gguf ./scripts/setup.sh   # 1.5 GB
 ```
 
 Other repos with identical weights: `mradermacher/...-GGUF`,
@@ -147,6 +161,79 @@ Q4 hits 15–20 tok/s but writes noticeably worse code.
 Context defaults to 8192. `CTX=4096 ./scripts/serve.sh` roughly halves KV-cache RAM
 and is usually enough for single-file edits. `CTX=16384` fits in 16 GB but leaves
 little headroom.
+
+## Using it from OpenCode
+
+Add a provider to `~/.config/opencode/opencode.json` (OpenCode V2 shape):
+
+```jsonc
+{
+  "providers": {
+    "codespace": {
+      "name": "Codespace llama.cpp",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "http://127.0.0.1:8080/v1",
+        "apiKey": "sk-local-no-auth",
+        "headerTimeout": 600000,
+        "chunkTimeout": 600000
+      },
+      "models": {
+        "qwen2.5-coder-7b-abliterated": {
+          "modelID": "qwen2.5-coder-7b-abliterated",
+          "name": "Qwen2.5 Coder 7B abliterated (local)",
+          "capabilities": { "tools": true, "input": ["text"], "output": ["text"] },
+          "compatibility": { "maxTokensField": "max_tokens", "streamUsage": false },
+          "limit": { "context": 16384, "output": 2048 }
+        }
+      }
+    }
+  }
+}
+```
+
+Then:
+
+```bash
+opencode run --model codespace/qwen2.5-coder-7b-abliterated "explain this repo"
+```
+
+or pick it from `/models`. To make it the default, add `"model": "codespace/qwen2.5-coder-7b-abliterated"` at the root.
+
+### Why 16384 context, not 8192
+
+OpenCode's system prompt plus tool definitions is **~5.5k tokens** before your first
+message. At 8192 the request overflows and llama-server errors out. 16k also leaves
+room for a few file reads.
+
+### The prefill problem (important)
+
+Prefill is the cost of *reading* your prompt before it writes anything. Measured on
+4 vCPU with OpenCode's actual request:
+
+| Model | Prefill | Generate | OpenCode system prompt (~5.5k tok) |
+| --- | --- | --- | --- |
+| 7B Q4_K_M | 13–14.5 tok/s | 7.6 tok/s | ~6.5 min before the first token |
+| 3B Q4_K_M | 26.9–34 tok/s | 9.0 tok/s | ~3.4 min before the first token |
+
+OpenCode sends 5–10k tokens every turn, so the 7B spends ~6.5 minutes *reading* the
+harness before answering, and the 3B ~3.4 minutes. Neither is interactive-grade.
+
+Verified end to end: `opencode run --model codespace3b/qwen2.5-coder-3b-abliterated
+"Reply with exactly: opencode-ok"` returned `opencode-ok` after 206 s of prefill.
+
+Practical reading of that:
+
+- **7B** — good for one-shot chat in the llama.cpp web UI or a small `curl`; not
+  workable as an OpenCode driver.
+- **3B** — workable for `opencode run "one task"` invocations where you accept ~3–5
+  minutes per turn. Still rough for long interactive sessions, because context grows
+  and prefill grows with it.
+- **Run one server at a time.** Two `llama-server` processes on 4 vCPU starve each
+  other — observed at 0.47 tok/s. Stop the 7B before starting the 3B.
+
+If you need interactive agentic coding, keep a hosted model for the chat loop and use
+this box for cheap batch work (`opencode run` over a list of files, overnight).
 
 ## The quota reality
 
