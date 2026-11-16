@@ -148,6 +148,10 @@ MODEL_FILE=Qwen2.5-Coder-7B-Instruct-abliterated-Q3_K_M.gguf ./scripts/setup.sh 
 # 3B — the one that's actually responsive through OpenCode
 MODEL_REPO=bartowski/Qwen2.5-Coder-3B-Instruct-abliterated-GGUF \
 MODEL_FILE=Qwen2.5-Coder-3B-Instruct-abliterated-Q4_K_M.gguf ./scripts/setup.sh   # 1.5 GB
+
+# Qwen3 4B — the only one here that reliably drives OpenCode's agent loop
+MODEL_REPO=unsloth/Qwen3-4B-Instruct-2507-GGUF \
+MODEL_FILE=Qwen3-4B-Instruct-2507-Q4_K_M.gguf ./scripts/setup.sh                  # 2.5 GB
 ```
 
 Other repos with identical weights: `mradermacher/...-GGUF`,
@@ -169,19 +173,19 @@ Add a provider to `~/.config/opencode/opencode.json` (OpenCode V2 shape):
 ```jsonc
 {
   "providers": {
-    "codespace": {
-      "name": "Codespace llama.cpp",
+    "codespace-q3": {
+      "name": "Codespace llama.cpp (Qwen3 4B)",
       "package": "@opencode/ai/providers/openai-compatible",
       "settings": {
-        "baseURL": "http://127.0.0.1:8080/v1",
+        "baseURL": "http://127.0.0.1:8081/v1",
         "apiKey": "sk-local-no-auth",
         "headerTimeout": 600000,
         "chunkTimeout": 600000
       },
       "models": {
-        "qwen2.5-coder-7b-abliterated": {
-          "modelID": "qwen2.5-coder-7b-abliterated",
-          "name": "Qwen2.5 Coder 7B abliterated (local)",
+        "qwen3-4b-instruct-2507": {
+          "modelID": "qwen3-4b-instruct-2507",
+          "name": "Qwen3 4B Instruct 2507 (local, tools work)",
           "capabilities": { "tools": true, "input": ["text"], "output": ["text"] },
           "compatibility": { "maxTokensField": "max_tokens", "streamUsage": false },
           "limit": { "context": 16384, "output": 2048 }
@@ -195,10 +199,39 @@ Add a provider to `~/.config/opencode/opencode.json` (OpenCode V2 shape):
 Then:
 
 ```bash
-opencode run --model codespace/qwen2.5-coder-7b-abliterated "explain this repo"
+opencode run --model codespace-q3/qwen3-4b-instruct-2507 "read package.json and list the scripts"
 ```
 
-or pick it from `/models`. To make it the default, add `"model": "codespace/qwen2.5-coder-7b-abliterated"` at the root.
+or pick it from `/models`. To make it the default, add `"model": "codespace-q3/qwen3-4b-instruct-2507"` at the root.
+
+### Do NOT use Qwen2.5-Coder for tool calling
+
+This is the trap that cost the most time. **Ab-literated Qwen2.5-Coder will not emit
+tool calls**, at any size. It writes the call as markdown prose instead:
+
+```
+tool_calls=0  finish_reason=stop
+content: ```json
+{"name": "read", "arguments": {"path": ["C:\\...a.txt", "C:\\...b.txt"]}}
+```
+```
+
+So `read` gets an array where the schema says string, no tool executes, and OpenCode
+sits there having "done nothing". Measured, same prompt, same server:
+
+| Model | Native `tool_calls` | Notes |
+| --- | --- | --- |
+| Qwen2.5-Coder-3B-abliterated | **0 / 3** | fenced JSON, wrong argument types |
+| Qwen2.5-Coder-7B-abliterated | **0 / 2** | fenced JSON array of calls |
+| Qwen3-4B-Instruct-2507 | **3 / 3** | `finish_reason=tool_calls`, correct strings |
+
+It is not the template: `POST /apply-template` confirms llama.cpp injects the `<tools>`
+block and the "wrap calls in `<tool_call>`" instruction. The models ignore it. Abliteration
+plus Qwen2.5-Coder's weak tool training is the cause — it is a **completion/chat model**,
+not an agent model.
+
+Use the Qwen2.5-Coder models for what they're good at (fill-in-the-middle, explaining
+code, single-shot generation in the web UI), and Qwen3 for anything that has to call a tool.
 
 ### Why 16384 context, not 8192
 

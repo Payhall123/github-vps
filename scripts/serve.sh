@@ -26,6 +26,7 @@ exec "${SERVER}" \
   --host 127.0.0.1 \
   --port "${PORT}" \
   --ctx-size "${CTX}" \
+  --parallel 1 \
   --threads "${THREADS}" \
   --threads-batch "${THREADS}" \
   --jinja \
