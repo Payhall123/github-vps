@@ -6,7 +6,7 @@ set -euo pipefail
 MODEL_FILE="${MODEL_FILE:-Qwen2.5-Coder-7B-Instruct-abliterated-Q4_K_M.gguf}"
 ROOT="${HOME}/llm"
 MODEL_PATH="${ROOT}/models/${MODEL_FILE}"
-SERVER="${ROOT}/bin/build/bin/llama-server"
+SERVER="$(find "${ROOT}/bin" -type f -name llama-server 2>/dev/null | head -n1)"
 
 PORT="${PORT:-8080}"
 CTX="${CTX:-8192}"          # context window. 4k halves RAM vs 8k
