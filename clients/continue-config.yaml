@@ -1,0 +1,28 @@
+# Continue (VS Code / JetBrains) config for the codespace model.
+# Copy to ~/.continue/config.yaml on your LOCAL machine while clients/connect.ps1 is running.
+name: codespace-local
+version: 0.0.1
+schema: v1
+
+models:
+  - name: Qwen2.5-Coder-7B-abliterated (codespace)
+    provider: openai
+    model: qwen2.5-coder-7b-abliterated
+    apiBase: http://localhost:8080/v1
+    apiKey: sk-local-no-auth
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      contextLength: 8192
+      maxTokens: 2048
+      temperature: 0.6
+
+context:
+  - provider: code
+  - provider: diff
+  - provider: terminal
+  - provider: problems
+
+allowAnonymousTelemetry: false

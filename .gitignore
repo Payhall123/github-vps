@@ -1,0 +1,5 @@
+llm/
+*.gguf
+*.zip
+.vscode/
+.DS_Store

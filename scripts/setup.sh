@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# One-time provisioning: llama.cpp binaries + the model weights.
+# Re-running is safe; already-downloaded pieces are skipped.
+set -euo pipefail
+
+MODEL_REPO="${MODEL_REPO:-bartowski/Qwen2.5-Coder-7B-Instruct-abliterated-GGUF}"
+MODEL_FILE="${MODEL_FILE:-Qwen2.5-Coder-7B-Instruct-abliterated-Q4_K_M.gguf}"
+
+ROOT="${HOME}/llm"
+BIN_DIR="${ROOT}/bin"
+MODEL_DIR="${ROOT}/models"
+mkdir -p "${BIN_DIR}" "${MODEL_DIR}"
+
+echo "==> installing runtime deps"
+sudo apt-get update -qq
+sudo apt-get install -y -qq curl unzip ca-certificates libgomp1 >/dev/null
+
+# ---------------------------------------------------------------- llama.cpp
+if [ ! -x "${BIN_DIR}/build/bin/llama-server" ]; then
+  echo "==> resolving latest llama.cpp linux build"
+  url=$(curl -fsSL https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+        | tr ',' '\n' \
+        | grep -o 'https://github.com/[^"]*bin-ubuntu-x64\.zip' \
+        | head -n1)
+
+  if [ -z "${url}" ]; then
+    echo "!! could not resolve a llama.cpp release asset; aborting" >&2
+    exit 1
+  fi
+  echo "    ${url}"
+
+  tmp=$(mktemp -d)
+  curl -fL --retry 3 -o "${tmp}/llama.zip" "${url}"
+  unzip -q -o "${tmp}/llama.zip" -d "${BIN_DIR}"
+  rm -rf "${tmp}"
+else
+  echo "==> llama.cpp already present"
+fi
+
+"${BIN_DIR}/build/bin/llama-server" --version 2>&1 | head -n 3 || true
+
+# -------------------------------------------------------------------- model
+MODEL_PATH="${MODEL_DIR}/${MODEL_FILE}"
+if [ ! -s "${MODEL_PATH}" ]; then
+  echo "==> downloading ${MODEL_FILE}"
+  hf_url="https://huggingface.co/${MODEL_REPO}/resolve/main/${MODEL_FILE}?download=true"
+  # -C - makes an interrupted download resumable
+  if [ -n "${HF_TOKEN:-}" ]; then
+    curl -fL --retry 5 --retry-delay 2 -C - \
+      -H "Authorization: Bearer ${HF_TOKEN}" \
+      -o "${MODEL_PATH}" "${hf_url}"
+  else
+    curl -fL --retry 5 --retry-delay 2 -C - -o "${MODEL_PATH}" "${hf_url}"
+  fi
+else
+  echo "==> model already present"
+fi
+
+echo
+echo "==> done"
+du -sh "${ROOT}"/* 2>/dev/null || true
+echo
+echo "    start the server with:  ./scripts/serve.sh"
